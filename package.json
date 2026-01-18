@@ -1,0 +1,19 @@
+{
+  "name": "moodle-mcp-http",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "*",
+    "express": "*"
+  },
+  "devDependencies": {
+    "@types/express": "*",
+    "tsx": "*",
+    "typescript": "*"
+  }
+}
