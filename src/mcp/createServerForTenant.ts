@@ -17,11 +17,14 @@ export function createServerForTenant(tenant: Tenant): Server {
   );
 
   const toolMap = createToolMap(ALL_TOOLS);
+  const tenantRoles = tenant.moodleRole;
+  const hasAllowedRole = (allowedRoles: Tenant["moodleRole"]) =>
+    allowedRoles.some((role) => tenantRoles.includes(role));
 
   // 1) listTools: filtra por rol SIEMPRE
   mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = ALL_TOOLS
-      .filter((t) => t.allowedRoles.includes(tenant.moodleRole))
+      .filter((t) => hasAllowedRole(t.allowedRoles))
       .map((t) => ({
         name: t.name,
         description: t.description,
@@ -44,7 +47,7 @@ export function createServerForTenant(tenant: Tenant): Server {
     }
 
     // Roles obligatorios (defensa en profundidad)
-    if (!spec.allowedRoles.includes(tenant.moodleRole)) {
+    if (!hasAllowedRole(spec.allowedRoles)) {
       return {
         content: [
           {
@@ -53,7 +56,7 @@ export function createServerForTenant(tenant: Tenant): Server {
               {
                 error: "FORBIDDEN_TOOL",
                 tool: spec.name,
-                role: tenant.moodleRole,
+                roles: tenant.moodleRole,
                 message: "This tool is not allowed for your role.",
               },
               null,

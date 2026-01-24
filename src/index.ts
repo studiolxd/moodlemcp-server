@@ -31,19 +31,26 @@ async function fetchTenantFromPanel(mcpKey: string): Promise<Tenant> {
     const data = (await res.json()) as {
       moodleUrl: string;
       moodleToken: string;
-      moodleRole: Role;
+      moodleRole: Role[];
     };
 
-    if (!data?.moodleUrl || !data?.moodleToken || !data?.moodleRole) {
+    if (!data?.moodleUrl || !data?.moodleToken || !Array.isArray(data?.moodleRole)) {
       throw new Error(
         "Invalid response from MCP Keys endpoint (missing moodleUrl/moodleToken/moodleRole)",
       );
     }
 
     // Runtime guard: panel puede devolver cualquier string aunque TS diga Role
-    if (!ALLOWED_ROLES_SET.has(data.moodleRole)) {
+    if (data.moodleRole.length === 0) {
+      throw new Error("Invalid moodleRole from MCP Keys endpoint: empty array");
+    }
+
+    const invalidRole = data.moodleRole.find(
+      (role) => typeof role !== "string" || !ALLOWED_ROLES_SET.has(role as Role),
+    );
+    if (invalidRole) {
       throw new Error(
-        `Invalid moodleRole from MCP Keys endpoint: ${String(data.moodleRole)}`,
+        `Invalid moodleRole from MCP Keys endpoint: ${String(invalidRole)}`,
       );
     }
 

@@ -14,7 +14,7 @@ export const ALLOWED_ROLES_SET: ReadonlySet<Role> = new Set<Role>(ALL_ROLES);
 export type Tenant = {
   moodleUrl: string;
   moodleToken: string;
-  moodleRole: Role;
+  moodleRole: Role[];
 };
 
 export type JSONSchema = {
