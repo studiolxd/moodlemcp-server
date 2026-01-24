@@ -5,12 +5,9 @@ import { randomUUID } from "node:crypto";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 
-import { callMoodleAPI } from "./moodle-client.js";
+import { createServerForTenant } from "./mcp/createServerForTenant.js";
+import { ALLOWED_ROLES_SET, type Tenant, type Role } from "./mcp/types.js";
 
 const PORT = Number(process.env.PORT || 3000);
 const app = express();
@@ -20,28 +17,41 @@ app.use(express.json());
 const MCP_KEYS_ENDPOINT =
   process.env.MCP_KEYS_ENDPOINT ?? "https://app.moodlemcp.com/api/mcp";
 
-type Tenant = {
-  moodleUrl: string;
-  moodleToken: string;
-};
-
 async function fetchTenantFromPanel(mcpKey: string): Promise<Tenant> {
   const res = await fetch(MCP_KEYS_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      // opcional: si quieres identificar el MCP server
       "User-Agent": "moodle-mcp-server/1.0",
     },
     body: JSON.stringify({ mcpKey }),
   });
 
   if (res.status === 200) {
-    const data = (await res.json()) as { moodleUrl: string; moodleToken: string };
-    if (!data?.moodleUrl || !data?.moodleToken) {
-      throw new Error("Invalid response from MCP Keys endpoint");
+    const data = (await res.json()) as {
+      moodleUrl: string;
+      moodleToken: string;
+      moodleRole: Role;
+    };
+
+    if (!data?.moodleUrl || !data?.moodleToken || !data?.moodleRole) {
+      throw new Error(
+        "Invalid response from MCP Keys endpoint (missing moodleUrl/moodleToken/moodleRole)",
+      );
     }
-    return { moodleUrl: data.moodleUrl, moodleToken: data.moodleToken };
+
+    // Runtime guard: panel puede devolver cualquier string aunque TS diga Role
+    if (!ALLOWED_ROLES_SET.has(data.moodleRole)) {
+      throw new Error(
+        `Invalid moodleRole from MCP Keys endpoint: ${String(data.moodleRole)}`,
+      );
+    }
+
+    return {
+      moodleUrl: data.moodleUrl,
+      moodleToken: data.moodleToken,
+      moodleRole: data.moodleRole,
+    };
   }
 
   // Mantén semántica: 404 no existe; 403 revocada/suspendida/expirada
@@ -78,81 +88,10 @@ type SessionCtx = {
 const sessions = new Map<string, SessionCtx>();
 
 function getSessionIdFromReq(req: Request): string | undefined {
-  return (
-    req.header("Mcp-Session-Id") || req.header("mcp-session-id") || undefined
-  );
+  return req.header("Mcp-Session-Id") || req.header("mcp-session-id") || undefined;
 }
 
-// Crea un MCP Server “atado” al tenant (closure)
-function createServerForTenant(tenant: Tenant): Server {
-  const mcpServer = new Server(
-    { name: "moodle-mcp", version: "1.0.0" },
-    { capabilities: { tools: {} } },
-  );
-
-  mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: "get_site_info",
-          description: "Gets general information about the Moodle site",
-          inputSchema: { type: "object", properties: {} },
-        },
-        {
-          name: "get_courses",
-          description: "Gets the list of available courses in Moodle",
-          inputSchema: { type: "object", properties: {} },
-        },
-      ],
-    };
-  });
-
-  mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name } = request.params;
-
-    try {
-      let result: unknown;
-
-      switch (name) {
-        case "get_site_info":
-          result = await callMoodleAPI(
-            tenant.moodleUrl,
-            tenant.moodleToken,
-            "core_webservice_get_site_info",
-            {},
-          );
-          break;
-
-        case "get_courses":
-          result = await callMoodleAPI(
-            tenant.moodleUrl,
-            tenant.moodleToken,
-            "core_course_get_courses",
-            {},
-          );
-          break;
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text", text: `Error: ${msg}` }],
-        isError: true,
-      };
-    }
-  });
-
-  return mcpServer;
-}
-
-// ====== Endpoint MCP: key en la URL (solo para enrutar el tenant) ======
-// Nota: tu key ya no valida local: la validamos llamando al panel.
+// ====== Endpoint MCP ======
 app.all("/mcp/:mcpKey", async (req: Request, res: Response) => {
   try {
     const method = req.method.toUpperCase();
@@ -179,7 +118,6 @@ app.all("/mcp/:mcpKey", async (req: Request, res: Response) => {
       return;
     }
 
-    // 🔥 Aquí está el cambio: fetch al panel
     const tenant = await fetchTenantFromPanel(mcpKey);
 
     const transport = new StreamableHTTPServerTransport({
@@ -213,7 +151,37 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", ts: new Date().toISOString() });
 });
 
+const LOG_LEVEL = (process.env.LOG_LEVEL ?? "info").toLowerCase();
+
+function logInfo(msg: string) {
+  if (LOG_LEVEL === "silent") return;  
+  console.log(msg);
+}
+
+function safeUrl(u: string) {
+  try {
+    const url = new URL(u);
+    url.search = "";
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return u;
+  }
+}
+
 app.listen(PORT, () => {
-  console.log(`🚀 MCP multi-tenant on http://localhost:${PORT}/mcp/<MCP_KEY>`);
-  console.log(`🔑 MCP Keys endpoint: ${MCP_KEYS_ENDPOINT}`);
+  const env = process.env.NODE_ENV ?? "development";
+  const host = process.env.HOST ?? "0.0.0.0";
+  const baseUrl =
+    env === "production"
+      ? `http://${host}:${PORT}`
+      : `http://localhost:${PORT}`;
+
+  logInfo(`✅ moodle-mcp-server started`);
+  logInfo(`   env: ${env}`);
+  logInfo(`   listen: ${host}:${PORT}`);
+  logInfo(`   mcp endpoint: ${baseUrl}/mcp/<MCP_KEY>`);
+  logInfo(`   health: ${baseUrl}/health`);
+  logInfo(`   panel endpoint: ${safeUrl(MCP_KEYS_ENDPOINT)}`);
 });
