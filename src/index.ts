@@ -38,7 +38,7 @@ async function fetchTenantFromPanel(mcpKey: string): Promise<Tenant> {
     const roles = Array.isArray(rolesRaw)
       ? rolesRaw
       : typeof rolesRaw === "string"
-        ? [rolesRaw]
+        ? [rolesRaw as Role]
         : undefined;
 
     if (!data?.moodleUrl || !data?.moodleToken || !roles) {
