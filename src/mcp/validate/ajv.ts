@@ -23,3 +23,13 @@ export function validateToolArgs(
   const ok = validate(args);
   return { ok: !!ok, errors: validate.errors };
 }
+
+// Generic validation for arbitrary schemas (responses or other payloads)
+export function validateSchema(
+  schema: any,
+  data: unknown,
+): { ok: boolean; errors: ErrorObject[] | null | undefined } {
+  const validate = ajv.compile(schema);
+  const ok = validate(data);
+  return { ok: !!ok, errors: validate.errors };
+}
