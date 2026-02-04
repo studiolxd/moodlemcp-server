@@ -1,10 +1,10 @@
-import Ajv from "ajv";
+import Ajv, { type SchemaObject } from "ajv";
 import type { ErrorObject } from "ajv";
 import type { ToolSpec } from "../types.js";
 
 const ajv = new Ajv({
   allErrors: true,
-  strict: false, // útil con schemas imperfectos o evolutivos
+  strict: false,
 });
 
 type ValidateFn = ReturnType<typeof ajv.compile>;
@@ -16,7 +16,7 @@ export function validateToolArgs(
 ): { ok: boolean; errors: ErrorObject[] | null | undefined } {
   let validate = compiled.get(spec.name);
   if (!validate) {
-    validate = ajv.compile(spec.inputSchema as any);
+    validate = ajv.compile(spec.inputSchema as SchemaObject);
     compiled.set(spec.name, validate);
   }
 

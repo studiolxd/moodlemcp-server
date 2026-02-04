@@ -1,23 +1,19 @@
-/**
- * Moodle REST client with improved error reporting and optional POST support.
- *
- * - Better error details (status, statusText, body snippet, Moodle exception fields)
- * - Handles non-JSON responses gracefully
- * - Supports GET (default) and POST
- * - Uses AbortSignal / timeout
- */
+const MOODLE_REST_PATH = "/webservice/rest/server.php";
+const DEFAULT_TIMEOUT_MS = 30_000;
+const ERROR_SNIPPET_MAX_LENGTH = 800;
+
 export async function callMoodleAPI(
   moodleUrl: string,
   token: string,
   functionName: string,
-  params: Record<string, any>,
+  params: Record<string, unknown>,
   options?: {
     method?: "GET" | "POST";
     signal?: AbortSignal;
     timeoutMs?: number;
   },
-): Promise<any> {
-  const url = `${moodleUrl.replace(/\/+$/, "")}/webservice/rest/server.php`;
+): Promise<unknown> {
+  const url = `${moodleUrl.replace(/\/+$/, "")}${MOODLE_REST_PATH}`;
 
   const flat = flattenParams(params);
 
@@ -32,7 +28,7 @@ export async function callMoodleAPI(
   // Optional timeout
   const controller = options?.signal ? null : new AbortController();
   const signal = options?.signal ?? controller?.signal;
-  const timeoutMs = options?.timeoutMs ?? 30_000;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timeout =
     controller && timeoutMs > 0
       ? setTimeout(() => controller.abort(), timeoutMs)
@@ -63,23 +59,21 @@ export async function callMoodleAPI(
     const rawText = await response.text();
 
     if (!response.ok) {
-      const snippet = rawText.slice(0, 800);
+      console.error(`[moodle-api] HTTP ${response.status} calling ${functionName}:`, rawText.slice(0, ERROR_SNIPPET_MAX_LENGTH));
       throw new Error(
-        `Moodle HTTP error (${response.status} ${response.statusText}) calling ${functionName}. Body: ${snippet}`,
+        `Moodle HTTP error (${response.status} ${response.statusText}) calling ${functionName}.`,
       );
     }
 
     // Parse JSON if possible (Moodle should return JSON but may not in some edge cases)
-    let data: any;
+    let data: unknown;
     if (contentType.includes("application/json") || looksLikeJson(rawText)) {
       try {
         data = rawText ? JSON.parse(rawText) : null;
       } catch {
+        console.error(`[moodle-api] Invalid JSON from ${functionName}:`, rawText.slice(0, ERROR_SNIPPET_MAX_LENGTH));
         throw new Error(
-          `Moodle response was not valid JSON calling ${functionName}. Content-Type: ${contentType}. Body: ${rawText.slice(
-            0,
-            800,
-          )}`,
+          `Moodle response was not valid JSON calling ${functionName}. Content-Type: ${contentType}.`,
         );
       }
     } else {
@@ -88,11 +82,12 @@ export async function callMoodleAPI(
     }
 
     // Moodle reports errors inside JSON (exception/errorcode/message)
-    if (data?.exception) {
-      const exception = String(data.exception);
-      const errorcode = data.errorcode ? String(data.errorcode) : undefined;
-      const message = data.message ? String(data.message) : "Error de la API de Moodle";
-      const debuginfo = data.debuginfo ? String(data.debuginfo) : undefined;
+    const moodleData = data as Record<string, unknown> | null;
+    if (moodleData?.exception) {
+      const exception = String(moodleData.exception);
+      const errorcode = moodleData.errorcode ? String(moodleData.errorcode) : undefined;
+      const message = moodleData.message ? String(moodleData.message) : "Error de la API de Moodle";
+      const debuginfo = moodleData.debuginfo ? String(moodleData.debuginfo) : undefined;
 
       const details = [
         `exception=${exception}`,
@@ -118,7 +113,7 @@ function looksLikeJson(text: string): boolean {
   return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
 }
 
-function flattenParams(params: Record<string, any>): Record<string, string> {
+function flattenParams(params: Record<string, unknown>): Record<string, string> {
   const flattened: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(params)) {
@@ -136,7 +131,7 @@ function flattenParams(params: Record<string, any>): Record<string, string> {
         }
       });
     } else if (typeof value === "object") {
-      for (const [k, v] of Object.entries(value as Record<string, any>)) {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         if (v === null || v === undefined) continue;
         flattened[`${key}[${k}]`] = String(v);
       }

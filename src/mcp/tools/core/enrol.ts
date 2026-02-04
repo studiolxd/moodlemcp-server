@@ -8,7 +8,7 @@ export const core_enrol_tools: ToolSpec[] = [
     inputSchema: {
       type: "object",
       properties: {
-        userid: { type: "number" },
+        userid: { type: "integer", description: "The user ID to get enrolled courses for." },
       },
       required: ["userid"],
       additionalProperties: false,

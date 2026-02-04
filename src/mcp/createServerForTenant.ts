@@ -6,9 +6,16 @@ import {
 
 import type { Tenant } from "./types.js";
 import { ALL_TOOLS, createToolMap } from "./tools/index.js";
-import { callMoodleAPI } from "../moodle-client.js";
+import { callMoodleAPI } from "../moodleClient.js";
 import { validateToolArgs } from "./validate/ajv.js";
 import { formatValidationError } from "./validate/formatAjvError.js";
+
+function errorResult(payload: object) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    isError: true,
+  };
+}
 
 export function createServerForTenant(tenant: Tenant): Server {
   const mcpServer = new Server(
@@ -34,38 +41,23 @@ export function createServerForTenant(tenant: Tenant): Server {
     return { tools };
   });
 
-  // 2) callTool: router genérico + check rol + AJV
+  // 2) callTool: router generico + check rol + AJV
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params as any;
+    const { name, arguments: args } = request.params;
 
     const spec = toolMap.get(name);
     if (!spec) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({ error: "UNKNOWN_TOOL", tool: name }, null, 2) }],
-        isError: true,
-      };
+      return errorResult({ error: "UNKNOWN_TOOL", tool: name });
     }
 
     // Roles obligatorios (defensa en profundidad)
     if (!hasAllowedRole(spec.allowedRoles)) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                error: "FORBIDDEN_TOOL",
-                tool: spec.name,
-                roles: tenant.moodleRoles,
-                message: "This tool is not allowed for your role.",
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: true,
-      };
+      return errorResult({
+        error: "FORBIDDEN_TOOL",
+        tool: spec.name,
+        roles: tenant.moodleRoles,
+        message: "This tool is not allowed for your role.",
+      });
     }
 
     const input = args ?? {};
@@ -73,11 +65,7 @@ export function createServerForTenant(tenant: Tenant): Server {
     // AJV: valida arguments
     const { ok, errors } = validateToolArgs(spec, input);
     if (!ok) {
-      const payload = formatValidationError(spec, errors);
-      return {
-        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-        isError: true,
-      };
+      return errorResult(formatValidationError(spec, errors));
     }
 
     try {
@@ -89,27 +77,15 @@ export function createServerForTenant(tenant: Tenant): Server {
       );
 
       return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
-    } catch (err) {
+    } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                error: "MOODLE_API_ERROR",
-                tool: spec.name,
-                message: msg,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-        isError: true,
-      };
+      return errorResult({
+        error: "MOODLE_API_ERROR",
+        tool: spec.name,
+        message: msg,
+      });
     }
   });
 

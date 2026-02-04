@@ -17,9 +17,21 @@ export type Tenant = {
   moodleRoles: Role[];
 };
 
+export type JSONSchemaProperty = {
+  type?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+  items?: JSONSchemaProperty;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
+  additionalProperties?: boolean;
+  [key: string]: unknown;
+};
+
 export type JSONSchema = {
   type: "object";
-  properties?: Record<string, any>;
+  properties?: Record<string, JSONSchemaProperty>;
   required?: string[];
   additionalProperties?: boolean | JSONSchema;
 };
@@ -31,7 +43,7 @@ export type ToolSpec = {
   inputSchema: JSONSchema;
   allowedRoles: Role[];
   examples?: {
-    minimal?: any;
-    typical?: any;
+    minimal?: Record<string, unknown>;
+    typical?: Record<string, unknown>;
   };
 };
