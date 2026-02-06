@@ -159,7 +159,7 @@ export const ALL_TOOLS: ToolSpec[] = [
   // ...core_competency_tools,
   // ...core_completion_tools,
   // ...core_contentbank_tools,
-  ...core_course_tools,
+  // ...core_course_tools,
   // ...core_courseformat_tools,
   // ...core_create_tools,
   // ...core_customfield_tools,
